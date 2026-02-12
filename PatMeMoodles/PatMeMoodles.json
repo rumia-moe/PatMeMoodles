@@ -1,0 +1,12 @@
+{
+  "Author": "rumia-moe",
+  "Name": "PatMeMoodles",
+  "Punchline": "Emotes counters with icons!",
+  "Description": "Display emote counters with the Moodles plugin.",
+  "ApplicableVersion": "any",
+  "Tags": [
+    "emote",
+    "plugin",
+    "moodles"
+  ]
+}

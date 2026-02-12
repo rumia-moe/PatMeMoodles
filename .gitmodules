@@ -1,0 +1,3 @@
+[submodule "Moodles"]
+	path = Moodles
+	url = https://github.com/kawaii/Moodles.git

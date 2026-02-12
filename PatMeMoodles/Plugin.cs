@@ -1,12 +1,12 @@
-﻿using Dalamud.Game.Command;
+using Dalamud.Game.Command;
+using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
 using Dalamud.Plugin;
-using System.IO;
-using Dalamud.Interface.Windowing;
 using Dalamud.Plugin.Services;
-using SamplePlugin.Windows;
+using ECommons;
+using PatMeMoodles.Windows;
 
-namespace SamplePlugin;
+namespace PatMeMoodles;
 
 public sealed class Plugin : IDalamudPlugin
 {
@@ -17,31 +17,33 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static IPlayerState PlayerState { get; private set; } = null!;
     [PluginService] internal static IDataManager DataManager { get; private set; } = null!;
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
+    [PluginService] internal static IGameInteropProvider GameInteropProvider { get; set; } = null!;
+    [PluginService] internal static IObjectTable ObjectTable { get; set; } = null!;
 
-    private const string CommandName = "/pmycommand";
+    private const string CommandName = "/pmm";
 
     public Configuration Configuration { get; init; }
 
-    public readonly WindowSystem WindowSystem = new("SamplePlugin");
-    private ConfigWindow ConfigWindow { get; init; }
+    public readonly WindowSystem WindowSystem = new("PatMeMoodles");
     private MainWindow MainWindow { get; init; }
+    private Hook Hook { get; init; }
+    public IPCService IPCService { get; init; }
 
-    public Plugin()
+    public Plugin(IDalamudPluginInterface pi)
     {
+        ECommonsMain.Init(pi, this);
+
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
 
-        // You might normally want to embed resources and load them from the manifest stream
-        var goatImagePath = Path.Combine(PluginInterface.AssemblyLocation.Directory?.FullName!, "goat.png");
+        MainWindow = new MainWindow(this);
+        Hook = new Hook(this);
+        IPCService = new IPCService(this);
 
-        ConfigWindow = new ConfigWindow(this);
-        MainWindow = new MainWindow(this, goatImagePath);
-
-        WindowSystem.AddWindow(ConfigWindow);
         WindowSystem.AddWindow(MainWindow);
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "A useful message to display in /xlhelp"
+            HelpMessage = "Opens the main window."
         });
 
         // Tell the UI system that we want our windows to be drawn through the window system
@@ -49,7 +51,7 @@ public sealed class Plugin : IDalamudPlugin
 
         // This adds a button to the plugin installer entry of this plugin which allows
         // toggling the display status of the configuration ui
-        PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUi;
+        PluginInterface.UiBuilder.OpenConfigUi += ToggleMainUi;
 
         // Adds another button doing the same but for the main ui of the plugin
         PluginInterface.UiBuilder.OpenMainUi += ToggleMainUi;
@@ -57,22 +59,23 @@ public sealed class Plugin : IDalamudPlugin
         // Add a simple message to the log with level set to information
         // Use /xllog to open the log window in-game
         // Example Output: 00:57:54.959 | INF | [SamplePlugin] ===A cool log message from Sample Plugin===
-        Log.Information($"===A cool log message from {PluginInterface.Manifest.Name}===");
+        Log.Information($"{PluginInterface.Manifest.Name} loaded.");
+
+
     }
 
     public void Dispose()
     {
         // Unregister all actions to not leak anything during disposal of plugin
         PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
-        PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
         PluginInterface.UiBuilder.OpenMainUi -= ToggleMainUi;
         
         WindowSystem.RemoveAllWindows();
 
-        ConfigWindow.Dispose();
-        MainWindow.Dispose();
-
         CommandManager.RemoveHandler(CommandName);
+
+        Hook.Dispose();
+        ECommonsMain.Dispose();
     }
 
     private void OnCommand(string command, string args)
@@ -81,6 +84,5 @@ public sealed class Plugin : IDalamudPlugin
         MainWindow.Toggle();
     }
     
-    public void ToggleConfigUi() => ConfigWindow.Toggle();
     public void ToggleMainUi() => MainWindow.Toggle();
 }
