@@ -19,6 +19,7 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
     [PluginService] internal static IGameInteropProvider GameInteropProvider { get; set; } = null!;
     [PluginService] internal static IObjectTable ObjectTable { get; set; } = null!;
+    [PluginService] internal static ICondition Condition { get; set; } = null!;
 
     private const string CommandName = "/pmm";
 

@@ -5,16 +5,18 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
+using Dalamud.Game.ClientState.Conditions;
 
 namespace PatMeMoodles;
 
-public class IPCService
+public class IPCService : IDisposable
 {
     private Plugin plugin;
-    // Stores the final version to re-apply
     private List<MyStatus> pendingUpdate = null;
-    // Tracks specifically which GUIDs are currently in the "Wipe" phase
     private HashSet<string> guidsWaitingForWipe = new();
+
+    // Stores the last data we successfully set, so we can force it after zoning
+    private string lastAppliedData = string.Empty;
 
     [EzIPC] private readonly Func<nint, string> GetStatusManagerByPtrV2;
     [EzIPC] private readonly Action<nint, string> SetStatusManagerByPtrV2;
@@ -23,6 +25,38 @@ public class IPCService
     {
         this.plugin = plugin;
         EzIPC.Init(this, "Moodles");
+
+        // Use ConditionChange as the universal "Transition Ended" trigger
+        Plugin.Condition.ConditionChange += OnConditionChange;
+    }
+
+    public void Dispose()
+    {
+        Plugin.Condition.ConditionChange -= OnConditionChange;
+    }
+
+    private void OnConditionChange(ConditionFlag flag, bool value)
+    {
+        // When any loading/zoning/occupancy flag turns OFF, it's our cue
+        if ((flag == ConditionFlag.BetweenAreas ||
+             flag == ConditionFlag.BetweenAreas51 ||
+             flag == ConditionFlag.OccupiedInCutSceneEvent) && value == false)
+        {
+            Plugin.Log.Debug($"Transition '{flag}' ended. Forcing re-sync.");
+
+            // If we have a known good state, push it immediately to overcome Moodles' silence
+            if (!string.IsNullOrEmpty(lastAppliedData))
+            {
+                var playerAddress = Plugin.ObjectTable.LocalPlayer?.Address ?? nint.Zero;
+                if (playerAddress != nint.Zero)
+                {
+                    SetStatusManagerByPtrV2(playerAddress, lastAppliedData);
+                }
+            }
+
+            // Then run a standard update to ensure counters are current
+            UpdateMoodles();
+        }
     }
 
     private static readonly MemoryPackSerializerOptions SerializerOptions = new() { StringEncoding = StringEncoding.Utf16 };
@@ -35,25 +69,22 @@ public class IPCService
     {
         if (charaPtr != Plugin.ObjectTable.LocalPlayer?.Address) return;
 
-        // STATE 2: Check if the surgical wipe for specific GUIDs is finished
+        // Surgical re-application logic
         if (pendingUpdate != null && guidsWaitingForWipe.Count > 0)
         {
             var currentData = GetStatusManagerByPtrV2(charaPtr);
-            var currentStatuses = string.IsNullOrEmpty(currentData)
-                ? new List<MyStatus>()
-                : MemoryPackSerializer.Deserialize<List<MyStatus>>(Convert.FromBase64String(currentData), SerializerOptions);
+            if (string.IsNullOrEmpty(currentData)) return;
 
-            // Verify that NONE of the specific GUIDs we are resetting are present
+            var currentStatuses = MemoryPackSerializer.Deserialize<List<MyStatus>>(Convert.FromBase64String(currentData), SerializerOptions);
+
             if (!currentStatuses.Any(x => guidsWaitingForWipe.Contains(x.GUID.ToString())))
             {
-                Plugin.Log.Info($"Surgical wipe confirmed for: {string.Join(", ", guidsWaitingForWipe)}. Re-applying.");
-
                 var finalData = Convert.ToBase64String(MemoryPackSerializer.Serialize(pendingUpdate));
 
-                // Clear states
                 pendingUpdate = null;
                 guidsWaitingForWipe.Clear();
 
+                lastAppliedData = finalData; // Remember this for next zone change
                 SetStatusManagerByPtrV2(charaPtr, finalData);
             }
             return;
@@ -65,10 +96,13 @@ public class IPCService
     public void UpdateMoodles()
     {
         var playerAddress = Plugin.ObjectTable.LocalPlayer?.Address ?? nint.Zero;
+        if (playerAddress == nint.Zero) return;
+
         var raw = GetStatusManagerByPtrV2(playerAddress);
         if (string.IsNullOrEmpty(raw)) return;
 
         var currentStatuses = MemoryPackSerializer.Deserialize<List<MyStatus>>(Convert.FromBase64String(raw), SerializerOptions);
+        if (currentStatuses.Count == 0 && guidsWaitingForWipe.Count == 0) return;
 
         bool needsUpdate = false;
         var processedList = new List<MyStatus>();
@@ -82,31 +116,25 @@ public class IPCService
 
             if (config != null)
             {
-                var parsedTitle = Parse(config.Title);
-                var parsedDesc = Parse(config.Description);
+                var pTitle = Parse(config.Title);
+                var pDesc = Parse(config.Description);
 
-                // Check if this specific Moodle needs an update
-                if (status.Title != parsedTitle || status.Description != parsedDesc)
+                if (status.Title != pTitle || status.Description != pDesc)
                 {
-                    status.Title = parsedTitle;
-                    status.Description = parsedDesc;
-
+                    status.Title = pTitle;
+                    status.Description = pDesc;
                     needsUpdate = true;
                     currentlyChangingGuids.Add(statusGuidStr);
-
-                    // Do NOT add to wipeList (this is the surgical removal)
                     processedList.Add(status);
                 }
                 else
                 {
-                    // Tracked but NO change: keep it in both lists so it doesn't blink
                     processedList.Add(status);
                     wipeList.Add(status);
                 }
             }
             else
             {
-                // Unrelated Moodle: Keep in both
                 processedList.Add(status);
                 wipeList.Add(status);
             }
@@ -114,13 +142,18 @@ public class IPCService
 
         if (needsUpdate)
         {
-            Plugin.Log.Info($"Surgically resetting {currentlyChangingGuids.Count} Moodles.");
+            if (wipeList.Count == 0 && currentStatuses.Count > 0 && currentlyChangingGuids.Count != currentStatuses.Count) return;
 
             pendingUpdate = processedList;
             guidsWaitingForWipe = currentlyChangingGuids;
 
-            // Step 1: Send the list with only the CHANGED Moodles removed
+            // We don't update lastAppliedData here because we are in the "Wipe" phase
             SetStatusManagerByPtrV2(playerAddress, Convert.ToBase64String(MemoryPackSerializer.Serialize(wipeList)));
+        }
+        else
+        {
+            // If everything is already correct, just save the current state as our recovery point
+            lastAppliedData = raw;
         }
     }
 
