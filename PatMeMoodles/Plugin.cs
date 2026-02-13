@@ -4,7 +4,10 @@ using Dalamud.IoC;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using ECommons;
+using ECommons.EzEventManager;
+using ECommons.Logging;
 using PatMeMoodles.Windows;
+using static FFXIVClientStructs.FFXIV.Client.UI.Misc.BannerHelper.Delegates;
 
 namespace PatMeMoodles;
 
@@ -20,6 +23,7 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static IGameInteropProvider GameInteropProvider { get; set; } = null!;
     [PluginService] internal static IObjectTable ObjectTable { get; set; } = null!;
     [PluginService] internal static ICondition Condition { get; set; } = null!;
+    [PluginService] internal static IFramework Framework { get; set; } = null!;
 
     private const string CommandName = "/pmm";
 
@@ -30,16 +34,15 @@ public sealed class Plugin : IDalamudPlugin
     private Hook Hook { get; init; }
     public IPCService IPCService { get; init; }
 
+    private int loginTicks = 0;
+
     public Plugin(IDalamudPluginInterface pi)
     {
         ECommonsMain.Init(pi, this);
-
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
 
         MainWindow = new MainWindow(this);
         Hook = new Hook(this);
-        IPCService = new IPCService(this);
-
         WindowSystem.AddWindow(MainWindow);
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
@@ -47,32 +50,61 @@ public sealed class Plugin : IDalamudPlugin
             HelpMessage = "Opens the main window."
         });
 
-        // Tell the UI system that we want our windows to be drawn through the window system
         PluginInterface.UiBuilder.Draw += WindowSystem.Draw;
-
-        // This adds a button to the plugin installer entry of this plugin which allows
-        // toggling the display status of the configuration ui
         PluginInterface.UiBuilder.OpenConfigUi += ToggleMainUi;
-
-        // Adds another button doing the same but for the main ui of the plugin
         PluginInterface.UiBuilder.OpenMainUi += ToggleMainUi;
 
-        // Add a simple message to the log with level set to information
-        // Use /xllog to open the log window in-game
-        // Example Output: 00:57:54.959 | INF | [SamplePlugin] ===A cool log message from Sample Plugin===
         Log.Information($"{PluginInterface.Manifest.Name} loaded.");
 
+        // Initialize the IPC Service (Do not touch the code inside IPCService.cs)
+        this.IPCService = new IPCService(this);
 
+        // SAFETY: We attach to the Framework and Login events.
+        // We DO NOT call UpdateMoodles here to avoid the "Not on main thread" crash.
+        Framework.Update += OnFrameworkUpdate;
+        ClientState.Login += OnLogin;
+    }
+
+    private void OnFrameworkUpdate(IFramework framework)
+    {
+        // If not logged in, keep resetting the counter
+        if (!ClientState.IsLoggedIn || ClientState.LocalPlayer == null)
+        {
+            loginTicks = 0;
+            return;
+        }
+
+        // Once logged in (or on plugin reload), wait for the game to settle.
+        // 30 frames is roughly 0.5s at 60fps.
+        if (loginTicks < 30)
+        {
+            loginTicks++;
+            if (loginTicks == 30)
+            {
+                // Now safely on the main thread, trigger the initial sync
+                Log.Debug("Login/Load settled on main thread. Triggering initial Moodles sync.");
+                this.IPCService.UpdateMoodles();
+            }
+        }
+    }
+
+    private void OnLogin()
+    {
+        // Reset ticks so the framework loop triggers for the new character
+        loginTicks = 0;
     }
 
     public void Dispose()
     {
-        // Unregister all actions to not leak anything during disposal of plugin
-        PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
-        PluginInterface.UiBuilder.OpenMainUi -= ToggleMainUi;
-        
-        WindowSystem.RemoveAllWindows();
+        // Unsubscribe to prevent the "Leaked hook" warning and memory leaks
+        Framework.Update -= OnFrameworkUpdate;
+        ClientState.Login -= OnLogin;
 
+        PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
+        PluginInterface.UiBuilder.OpenConfigUi -= ToggleMainUi;
+        PluginInterface.UiBuilder.OpenMainUi -= ToggleMainUi;
+
+        WindowSystem.RemoveAllWindows();
         CommandManager.RemoveHandler(CommandName);
 
         Hook.Dispose();
