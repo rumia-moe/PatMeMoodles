@@ -124,26 +124,25 @@ public sealed class Plugin : IDalamudPlugin
 
     public static string FormatNumber(double value)
     {
-        // Store the sign and work with the absolute value for scaling
         double absValue = Math.Abs(value);
-        string suffix = "";
-        double scaledValue = absValue;
+        int sign = Math.Sign(value);
 
         if (absValue >= 1000000)
         {
-            scaledValue = absValue / 1000000D;
-            suffix = "M";
+            double mValue = (absValue / 1000000D) * sign;
+            // "0.##" shows decimals only if they exist (e.g., 1.5M or 2M)
+            return mValue.ToString("0.##") + "M";
         }
-        else if (absValue >= 1000)
+
+        if (absValue >= 1000)
         {
-            scaledValue = absValue / 1000D;
-            suffix = "K";
+            double kValue = (absValue / 1000D) * sign;
+            return kValue.ToString("0.##") + "K";
         }
 
-        // Multiply the scaled value back by the original sign
-        double finalValue = scaledValue * Math.Sign(value);
-
-        return finalValue.ToString() + suffix;
+        // For normal numbers, use N0 to add commas but NO decimals
+        // e.g., 950, -42, 125
+        return value.ToString("N0");
     }
 
 }

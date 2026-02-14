@@ -193,7 +193,7 @@ public class IPCService : IDisposable
 
             if (plugin.Bank.dealer == null) return "0.00";
 
-            return plugin.Bank.sources.TryGetValue(plugin.Bank.dealer, out var val) ? Plugin.FormatNumber(val).ToString() : "0.00";
+            return Plugin.FormatNumber(plugin.Bank.sources.TryGetValue(plugin.Bank.dealer, out var val) ? val : 0);
 
         });
     }
