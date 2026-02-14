@@ -143,7 +143,7 @@ public sealed class Plugin : IDalamudPlugin
         // Multiply the scaled value back by the original sign
         double finalValue = scaledValue * Math.Sign(value);
 
-        return finalValue.ToString("0.00") + suffix;
+        return finalValue.ToString() + suffix;
     }
 
 }
