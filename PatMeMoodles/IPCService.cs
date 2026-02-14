@@ -12,11 +12,10 @@ namespace PatMeMoodles;
 public class IPCService : IDisposable
 {
     private Plugin plugin;
-    private List<MyStatus> pendingUpdate = null;
-    private HashSet<string> guidsWaitingForWipe = new();
 
-    // Stores the last data we successfully set, so we can force it after zoning
-    private string lastAppliedData = string.Empty;
+    private List<MyStatus> pendingStatusList = null;
+    private HashSet<Guid> guidsInTransition = new();
+    private string lastKnownGoodPack = string.Empty;
 
     [EzIPC] private readonly Func<nint, string> GetStatusManagerByPtrV2;
     [EzIPC] private readonly Action<nint, string> SetStatusManagerByPtrV2;
@@ -25,9 +24,8 @@ public class IPCService : IDisposable
     {
         this.plugin = plugin;
         EzIPC.Init(this, "Moodles");
-
-        // Use ConditionChange as the universal "Transition Ended" trigger
         Plugin.Condition.ConditionChange += OnConditionChange;
+        Plugin.Log.Information("[MoodlesSync] IPCService Initialized with Heavy Logging.");
     }
 
     public void Dispose()
@@ -37,55 +35,54 @@ public class IPCService : IDisposable
 
     private void OnConditionChange(ConditionFlag flag, bool value)
     {
-        // When any loading/zoning/occupancy flag turns OFF, it's our cue
-        if ((flag == ConditionFlag.BetweenAreas ||
-             flag == ConditionFlag.BetweenAreas51 ||
-             flag == ConditionFlag.OccupiedInCutSceneEvent) && value == false)
+        if ((flag == ConditionFlag.BetweenAreas || flag == ConditionFlag.OccupiedInCutSceneEvent) && value == false)
         {
-            Plugin.Log.Debug($"Transition '{flag}' ended. Forcing re-sync.");
+            Plugin.Log.Info($"[MoodlesSync] Transition Ended ({flag}). Triggering Recovery Re-apply.");
 
-            // If we have a known good state, push it immediately to overcome Moodles' silence
-            if (!string.IsNullOrEmpty(lastAppliedData))
+            var playerAddress = Plugin.ObjectTable.LocalPlayer?.Address ?? nint.Zero;
+            if (playerAddress != nint.Zero && !string.IsNullOrEmpty(lastKnownGoodPack))
             {
-                var playerAddress = Plugin.ObjectTable.LocalPlayer?.Address ?? nint.Zero;
-                if (playerAddress != nint.Zero)
-                {
-                    SetStatusManagerByPtrV2(playerAddress, lastAppliedData);
-                }
+                SetStatusManagerByPtrV2(playerAddress, lastKnownGoodPack);
+                guidsInTransition.Clear();
+                pendingStatusList = null;
             }
-
-            // Then run a standard update to ensure counters are current
-            UpdateMoodles();
         }
     }
 
-    private static readonly MemoryPackSerializerOptions SerializerOptions = new() { StringEncoding = StringEncoding.Utf16 };
-
     [EzIPCEvent]
-    private void Ready() => UpdateMoodles();
+    private void Ready()
+    {
+        Plugin.Log.Info("[MoodlesSync] IPC Ready Event received from Moodles.");
+        UpdateMoodles();
+    }
 
     [EzIPCEvent]
     private void StatusManagerModified(nint charaPtr)
     {
         if (charaPtr != Plugin.ObjectTable.LocalPlayer?.Address) return;
 
-        // Surgical re-application logic
-        if (pendingUpdate != null && guidsWaitingForWipe.Count > 0)
+        // VERBOSE: Log when the sync loop checks for confirmation
+        if (guidsInTransition.Count > 0 && pendingStatusList != null)
         {
-            var currentData = GetStatusManagerByPtrV2(charaPtr);
-            if (string.IsNullOrEmpty(currentData)) return;
+            Plugin.Log.Debug($"[MoodlesSync] StatusModified Event: Checking if {guidsInTransition.Count} GUIDs are wiped...");
+            var currentStatuses = Unpack(GetStatusManagerByPtrV2(charaPtr));
 
-            var currentStatuses = MemoryPackSerializer.Deserialize<List<MyStatus>>(Convert.FromBase64String(currentData), SerializerOptions);
+            bool oldGuidsPresent = currentStatuses.Any(x => guidsInTransition.Contains(x.GUID));
 
-            if (!currentStatuses.Any(x => guidsWaitingForWipe.Contains(x.GUID.ToString())))
+            if (!oldGuidsPresent)
             {
-                var finalData = Convert.ToBase64String(MemoryPackSerializer.Serialize(pendingUpdate));
+                Plugin.Log.Info("[MoodlesSync] RE-APPLY PHASE: Wipe confirmed. Pushing final updated list.");
+                lastKnownGoodPack = Pack(pendingStatusList);
 
-                pendingUpdate = null;
-                guidsWaitingForWipe.Clear();
+                var dataToSend = lastKnownGoodPack;
+                guidsInTransition.Clear();
+                pendingStatusList = null;
 
-                lastAppliedData = finalData; // Remember this for next zone change
-                SetStatusManagerByPtrV2(charaPtr, finalData);
+                SetStatusManagerByPtrV2(charaPtr, dataToSend);
+            }
+            else
+            {
+                Plugin.Log.Warning("[MoodlesSync] RE-APPLY DELAYED: Old GUIDs still visible in manager. Waiting for next cycle.");
             }
             return;
         }
@@ -95,24 +92,40 @@ public class IPCService : IDisposable
 
     public void UpdateMoodles()
     {
+        // ENTRY LOGGING
+        Plugin.Log.Verbose("[MoodlesSync] Function 'UpdateMoodles' called.");
+
         var playerAddress = Plugin.ObjectTable.LocalPlayer?.Address ?? nint.Zero;
-        if (playerAddress == nint.Zero) return;
+        if (playerAddress == nint.Zero)
+        {
+            Plugin.Log.Warning("[MoodlesSync] Update aborted: LocalPlayer address is null.");
+            return;
+        }
+
+        if (guidsInTransition.Count > 0)
+        {
+            Plugin.Log.Debug($"[MoodlesSync] Update throttled: {guidsInTransition.Count} GUIDs currently in transition.");
+            return;
+        }
 
         var raw = GetStatusManagerByPtrV2(playerAddress);
-        if (string.IsNullOrEmpty(raw)) return;
+        if (string.IsNullOrEmpty(raw))
+        {
+            Plugin.Log.Debug("[MoodlesSync] Update skipped: Status Manager is currently empty (Base64 null).");
+            return;
+        }
 
-        var currentStatuses = MemoryPackSerializer.Deserialize<List<MyStatus>>(Convert.FromBase64String(raw), SerializerOptions);
-        if (currentStatuses.Count == 0 && guidsWaitingForWipe.Count == 0) return;
+        var currentStatuses = Unpack(raw);
+        Plugin.Log.Verbose($"[MoodlesSync] Processing {currentStatuses.Count} active moodles.");
 
-        bool needsUpdate = false;
-        var processedList = new List<MyStatus>();
+        bool needsSync = false;
+        var nextList = new List<MyStatus>();
         var wipeList = new List<MyStatus>();
-        var currentlyChangingGuids = new HashSet<string>();
+        var guidsToWipe = new HashSet<Guid>();
 
         foreach (var status in currentStatuses)
         {
-            var statusGuidStr = status.GUID.ToString();
-            var config = plugin.Configuration.counterMoodles.FirstOrDefault(x => x.Id == statusGuidStr);
+            var config = plugin.Configuration.counterMoodles.FirstOrDefault(x => x.Id == status.GUID.ToString());
 
             if (config != null)
             {
@@ -121,41 +134,56 @@ public class IPCService : IDisposable
 
                 if (status.Title != pTitle || status.Description != pDesc)
                 {
+                    Plugin.Log.Info($"[MoodlesSync] SYNC REQUIRED: GUID {status.GUID} text changed.");
+                    needsSync = true;
                     status.Title = pTitle;
                     status.Description = pDesc;
-                    needsUpdate = true;
-                    currentlyChangingGuids.Add(statusGuidStr);
-                    processedList.Add(status);
+                    guidsToWipe.Add(status.GUID);
                 }
-                else
-                {
-                    processedList.Add(status);
-                    wipeList.Add(status);
-                }
+                nextList.Add(status);
             }
             else
             {
-                processedList.Add(status);
-                wipeList.Add(status);
+                nextList.Add(status);
             }
         }
 
-        if (needsUpdate)
+        if (needsSync)
         {
-            if (wipeList.Count == 0 && currentStatuses.Count > 0 && currentlyChangingGuids.Count != currentStatuses.Count) return;
+            Plugin.Log.Info($"[MoodlesSync] WIPE PHASE: Removing {guidsToWipe.Count} statuses to force network refresh.");
+            pendingStatusList = nextList;
+            guidsInTransition = guidsToWipe;
 
-            pendingUpdate = processedList;
-            guidsWaitingForWipe = currentlyChangingGuids;
+            // CLEARING LOGIC: Build list excluding the ones being wiped
+            foreach (var s in nextList)
+            {
+                if (!guidsToWipe.Contains(s.GUID)) wipeList.Add(s);
+            }
 
-            // We don't update lastAppliedData here because we are in the "Wipe" phase
-            SetStatusManagerByPtrV2(playerAddress, Convert.ToBase64String(MemoryPackSerializer.Serialize(wipeList)));
+            Plugin.Log.Debug($"[MoodlesSync] Sending wipe-list with {wipeList.Count} statuses remaining.");
+            SetStatusManagerByPtrV2(playerAddress, Pack(wipeList));
         }
         else
         {
-            // If everything is already correct, just save the current state as our recovery point
-            lastAppliedData = raw;
+            lastKnownGoodPack = raw;
+            Plugin.Log.Verbose("[MoodlesSync] Update finished: No text changes detected.");
         }
     }
+
+    private List<MyStatus> Unpack(string base64)
+    {
+        if (string.IsNullOrEmpty(base64)) return new List<MyStatus>();
+        try { return MemoryPackSerializer.Deserialize<List<MyStatus>>(Convert.FromBase64String(base64), SerializerOptions); }
+        catch (Exception e)
+        {
+            Plugin.Log.Error($"[MoodlesSync] Unpack Error: {e.Message}");
+            return new List<MyStatus>();
+        }
+    }
+
+    private string Pack(List<MyStatus> list) => Convert.ToBase64String(MemoryPackSerializer.Serialize(list, SerializerOptions));
+
+    private static readonly MemoryPackSerializerOptions SerializerOptions = new() { StringEncoding = StringEncoding.Utf16 };
 
     public string Parse(string input)
     {
