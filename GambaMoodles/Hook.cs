@@ -86,9 +86,6 @@ public unsafe class Hook : IDisposable
         int netChange = pendingIn - pendingOut;
         bank[pendingTargetName] += netChange;
 
-        // FORCE OVERWRITE: Update the UI buffer so the manual input doesn't block the trade result
-        plugin.MainWindow.UpdateEditBuffer(pendingTargetName, bank[pendingTargetName]);
-
         plugin.Configuration.Save();
         Plugin.Log.Info($"[SUCCESS] {pendingTargetName} balance: {bank[pendingTargetName]}");
         plugin.IPCService?.UpdateMoodles();

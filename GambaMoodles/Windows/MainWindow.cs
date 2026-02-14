@@ -8,8 +8,11 @@ public class MainWindow(Plugin plugin) : Window("GambaMoodles")
 {
     private readonly Configuration configuration = plugin.Configuration;
 
-    // Buffer to hold what you're typing in the table
+    // Buffer to hold what you're currently typing in the input boxes
     private readonly Dictionary<string, int> editBuffer = new();
+
+    // Tracks the balance we last displayed to detect if a trade updated it in the background
+    private readonly Dictionary<string, int> lastSeenBalances = new();
 
     // Buffer for the "Add New Player" text input
     private string newPlayerName = string.Empty;
@@ -22,7 +25,7 @@ public class MainWindow(Plugin plugin) : Window("GambaMoodles")
         DrawMoodleList();
         ImGui.Separator();
 
-        DrawManualAdd(); // New Section
+        DrawManualAdd();
         ImGui.Spacing();
 
         DrawCounterTable();
@@ -91,8 +94,10 @@ public class MainWindow(Plugin plugin) : Window("GambaMoodles")
                 {
                     // Add to bank with 0 balance
                     plugin.Bank.sources[cleanedName] = 0;
-                    // Initialize the edit buffer so it shows up in the table correctly
+
+                    // Initialize buffers
                     editBuffer[cleanedName] = 0;
+                    lastSeenBalances[cleanedName] = 0;
 
                     plugin.Configuration.Save();
                     newPlayerName = string.Empty; // Clear input
@@ -151,44 +156,59 @@ public class MainWindow(Plugin plugin) : Window("GambaMoodles")
             foreach (var entry in plugin.Bank.sources.ToList())
             {
                 ImGui.TableNextRow();
+                string name = entry.Key;
+                int actualBalance = entry.Value;
 
                 // Column 1: Name
                 ImGui.TableNextColumn();
-                ImGui.Text(entry.Key);
+                ImGui.Text(name);
 
-                // Column 2: Money Amount (Buffered)
+                // Column 2: Money Amount (Smart Buffer)
                 ImGui.TableNextColumn();
 
-                // Only initialize if we've NEVER seen this player in the buffer this session
-                if (!editBuffer.ContainsKey(entry.Key))
+                // 1. Initialize buffers if we've never seen this player before
+                if (!lastSeenBalances.ContainsKey(name)) lastSeenBalances[name] = actualBalance;
+                if (!editBuffer.ContainsKey(name)) editBuffer[name] = actualBalance;
+
+                // 2. DETECTION: If the actual balance in the Bank changed (background trade),
+                // we overwrite the edit buffer immediately so the UI shows the new total.
+                if (actualBalance != lastSeenBalances[name])
                 {
-                    editBuffer[entry.Key] = entry.Value;
+                    editBuffer[name] = actualBalance;
+                    lastSeenBalances[name] = actualBalance;
                 }
 
-                int val = editBuffer[entry.Key];
+                int bufferVal = editBuffer[name];
                 ImGui.SetNextItemWidth(-1);
 
-                if (ImGui.InputInt($"##edit_{entry.Key}", ref val, 0, 0))
+                if (ImGui.InputInt($"##edit_{name}", ref bufferVal, 0, 0))
                 {
-                    editBuffer[entry.Key] = val;
+                    editBuffer[name] = bufferVal;
                 }
 
                 // Column 3: Actions
                 ImGui.TableNextColumn();
-                if (ImGui.Button($"Set##{entry.Key}"))
+                if (ImGui.Button($"Set##{name}"))
                 {
-                    plugin.Bank.sources[entry.Key] = editBuffer[entry.Key];
+                    // Update bank and save
+                    plugin.Bank.sources[name] = editBuffer[name];
+
+                    // IMPORTANT: Update lastSeenBalance to match what we just set 
+                    // so we don't trigger the "background change" logic on our own change.
+                    lastSeenBalances[name] = editBuffer[name];
+
                     plugin.Configuration.Save();
                     plugin.IPCService.UpdateMoodles();
                 }
 
                 ImGui.SameLine();
 
-                if (ImGui.Button($"Delete##{entry.Key}"))
+                if (ImGui.Button($"Delete##{name}"))
                 {
-                    plugin.Bank.sources.Remove(entry.Key);
-                    editBuffer.Remove(entry.Key);
-                    if (plugin.Bank.dealer == entry.Key) plugin.Bank.dealer = null;
+                    plugin.Bank.sources.Remove(name);
+                    editBuffer.Remove(name);
+                    lastSeenBalances.Remove(name);
+                    if (plugin.Bank.dealer == name) plugin.Bank.dealer = null;
                     plugin.Configuration.Save();
                     plugin.IPCService.UpdateMoodles();
                 }
@@ -202,17 +222,12 @@ public class MainWindow(Plugin plugin) : Window("GambaMoodles")
             {
                 plugin.Bank.sources.Clear();
                 editBuffer.Clear();
+                lastSeenBalances.Clear();
                 plugin.Bank.dealer = null;
                 plugin.Configuration.Save();
                 plugin.IPCService.UpdateMoodles();
             }
         }
-    }
-
-    // Add this method inside the MainWindow class
-    public void UpdateEditBuffer(string name, int newValue)
-    {
-        // This forces the UI to show the new trade value, even if you were typing
-        editBuffer[name] = newValue;
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Hold SHIFT to clear everything.");
     }
 }
