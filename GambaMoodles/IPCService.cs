@@ -7,7 +7,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using Dalamud.Game.ClientState.Conditions;
 
-namespace PatMeMoodles;
+namespace GambaMoodles;
 
 public class IPCService : IDisposable
 {
@@ -112,7 +112,7 @@ public class IPCService : IDisposable
         foreach (var status in currentStatuses)
         {
             var statusGuidStr = status.GUID.ToString();
-            var config = plugin.Configuration.counterMoodles.FirstOrDefault(x => x.Id == statusGuidStr);
+            var config = plugin.Configuration.moodles.FirstOrDefault(x => x.Id == statusGuidStr);
 
             if (config != null)
             {
@@ -160,13 +160,13 @@ public class IPCService : IDisposable
     public string Parse(string input)
     {
         if (string.IsNullOrEmpty(input)) return string.Empty;
-        return Regex.Replace(input, @"\$(\d+)", match =>
+        return Regex.Replace(input, @"@gamba", match =>
         {
-            if (ushort.TryParse(match.Groups[1].Value, out var id))
-            {
-                return plugin.Configuration.emoteCounter.TryGetValue(id, out var val) ? val.ToString() : "0";
-            }
-            return match.Value;
+
+            if (plugin.Bank.dealer == null) return "0.00";
+
+            return plugin.Bank.sources.TryGetValue(plugin.Bank.dealer, out var val) ? Plugin.FormatNumber(val).ToString() : "0.00";
+
         });
     }
 }

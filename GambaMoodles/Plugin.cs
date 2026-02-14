@@ -6,10 +6,10 @@ using Dalamud.Plugin.Services;
 using ECommons;
 using ECommons.EzEventManager;
 using ECommons.Logging;
-using PatMeMoodles.Windows;
+using GambaMoodles.Windows;
 using static FFXIVClientStructs.FFXIV.Client.UI.Misc.BannerHelper.Delegates;
 
-namespace PatMeMoodles;
+namespace GambaMoodles;
 
 public sealed class Plugin : IDalamudPlugin
 {
@@ -24,13 +24,16 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static IObjectTable ObjectTable { get; set; } = null!;
     [PluginService] internal static ICondition Condition { get; set; } = null!;
     [PluginService] internal static IFramework Framework { get; set; } = null!;
+    [PluginService] internal static IAddonLifecycle AddonLifecycle { get; set; } = null!;
+    [PluginService] internal static IChatGui ChatGUI { get; set; } = null!;
 
-    private const string CommandName = "/pmm";
+    private const string CommandName = "/gm";
 
     public Configuration Configuration { get; init; }
+    public Bank Bank { get; init; }
 
-    public readonly WindowSystem WindowSystem = new("PatMeMoodles");
-    private MainWindow MainWindow { get; init; }
+    public readonly WindowSystem WindowSystem = new("GambaMoodles");
+    public MainWindow MainWindow { get; init; }
     private Hook Hook { get; init; }
     public IPCService IPCService { get; init; }
 
@@ -40,7 +43,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         ECommonsMain.Init(pi, this);
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
-
+        Bank = new();
         MainWindow = new MainWindow(this);
         Hook = new Hook(this);
         WindowSystem.AddWindow(MainWindow);
@@ -118,4 +121,29 @@ public sealed class Plugin : IDalamudPlugin
     }
     
     public void ToggleMainUi() => MainWindow.Toggle();
+
+    public static string FormatNumber(double value)
+    {
+        // Store the sign and work with the absolute value for scaling
+        double absValue = Math.Abs(value);
+        string suffix = "";
+        double scaledValue = absValue;
+
+        if (absValue >= 1000000)
+        {
+            scaledValue = absValue / 1000000D;
+            suffix = "M";
+        }
+        else if (absValue >= 1000)
+        {
+            scaledValue = absValue / 1000D;
+            suffix = "K";
+        }
+
+        // Multiply the scaled value back by the original sign
+        double finalValue = scaledValue * Math.Sign(value);
+
+        return finalValue.ToString("0.00") + suffix;
+    }
+
 }
