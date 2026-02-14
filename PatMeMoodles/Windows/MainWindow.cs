@@ -2,12 +2,17 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
 using Lumina.Excel.Sheets;
 using System.Numerics;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace PatMeMoodles.Windows;
 
 public class MainWindow(Plugin plugin) : Window("PatMeMoodles")
 {
     private readonly Configuration configuration = plugin.Configuration;
+
+    // The buffer to store typing changes without immediate saving
+    private readonly Dictionary<ushort, int> editBuffer = new();
 
     public override void Draw()
     {
@@ -45,7 +50,6 @@ public class MainWindow(Plugin plugin) : Window("PatMeMoodles")
             var config = configuration.counterMoodles[i];
             ImGui.PushID($"counterMoodle_{i}");
 
-            // Create a unique header label
             var headerLabel = string.IsNullOrWhiteSpace(config.Title)
                 ? $"Moodle {i + 1} (Empty)"
                 : config.Title;
@@ -54,22 +58,18 @@ public class MainWindow(Plugin plugin) : Window("PatMeMoodles")
             {
                 ImGui.Indent();
 
-                // ID Input
                 ImGui.AlignTextToFramePadding();
                 ImGui.Text("GUID:"); ImGui.SameLine();
                 if (ImGui.InputText("##id", ref config.Id, 128)) configuration.Save();
 
-                // Title Input
                 ImGui.AlignTextToFramePadding();
                 ImGui.Text("Title:"); ImGui.SameLine();
                 if (ImGui.InputText("##title", ref config.Title, 128)) configuration.Save();
 
-                // Description Input
                 ImGui.Text("Description ($ID to inject counter):");
                 if (ImGui.InputTextMultiline("##desc", ref config.Description, 500, new Vector2(-1, 60)))
                     configuration.Save();
 
-                // Delete Button for this specific Moodle
                 ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.4f, 0.1f, 0.1f, 1f));
                 if (ImGui.Button("Delete This Moodle"))
                 {
@@ -91,29 +91,53 @@ public class MainWindow(Plugin plugin) : Window("PatMeMoodles")
 
         var emoteSheet = Plugin.DataManager.GetExcelSheet<Emote>();
 
-        if (ImGui.BeginTable("##counterTable", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY, new Vector2(0, 200)))
+        // Increased table columns to 4 to accommodate the 'Set' button
+        if (ImGui.BeginTable("##counterTable", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY, new Vector2(0, 200)))
         {
             ImGui.TableSetupColumn("Emote Name", ImGuiTableColumnFlags.WidthStretch);
-            ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthFixed, 50);
-            ImGui.TableSetupColumn("Action", ImGuiTableColumnFlags.WidthFixed, 60);
+            ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthFixed, 80);
+            ImGui.TableSetupColumn("Set", ImGuiTableColumnFlags.WidthFixed, 45);
+            ImGui.TableSetupColumn("Del", ImGuiTableColumnFlags.WidthFixed, 45);
             ImGui.TableHeadersRow();
 
-            // Use ToList to avoid "collection modified" errors if we remove during loop
             foreach (var entry in configuration.emoteCounter.ToList())
             {
                 ImGui.TableNextRow();
 
+                // Column 1: Name
                 ImGui.TableNextColumn();
                 var emoteName = emoteSheet?.GetRow(entry.Key).Name.ToString() ?? "Unknown";
                 ImGui.Text($"{emoteName} (${entry.Key})");
 
+                // Column 2: Value (Buffered Input)
                 ImGui.TableNextColumn();
-                ImGui.Text(entry.Value.ToString());
 
+                // Initialize buffer with actual value if not present
+                if (!editBuffer.ContainsKey(entry.Key))
+                    editBuffer[entry.Key] = entry.Value;
+
+                int val = editBuffer[entry.Key];
+                ImGui.SetNextItemWidth(-1);
+                if (ImGui.InputInt($"##edit_{entry.Key}", ref val, 0, 0))
+                {
+                    editBuffer[entry.Key] = val;
+                }
+
+                // Column 3: Set Button
                 ImGui.TableNextColumn();
-                if (ImGui.SmallButton($"Reset##{entry.Key}"))
+                if (ImGui.Button($"Set##{entry.Key}"))
+                {
+                    configuration.emoteCounter[entry.Key] = editBuffer[entry.Key];
+                    configuration.Save();
+                    plugin.IPCService.UpdateMoodles();
+                }
+
+                // Column 4: Delete Button
+                ImGui.TableNextColumn();
+                if (ImGui.Button($"X##{entry.Key}"))
                 {
                     configuration.emoteCounter.Remove(entry.Key);
+                    editBuffer.Remove(entry.Key);
                     configuration.Save();
                     plugin.IPCService.UpdateMoodles();
                 }
@@ -123,9 +147,14 @@ public class MainWindow(Plugin plugin) : Window("PatMeMoodles")
 
         if (ImGui.Button("Reset All Counters"))
         {
-            configuration.emoteCounter.Clear();
-            configuration.Save();
-            plugin.IPCService.UpdateMoodles();
+            if (ImGui.GetIO().KeyShift)
+            {
+                configuration.emoteCounter.Clear();
+                editBuffer.Clear();
+                configuration.Save();
+                plugin.IPCService.UpdateMoodles();
+            }
         }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Hold SHIFT to clear everything.");
     }
 }
