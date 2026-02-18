@@ -11,6 +11,7 @@ namespace PatMeMoodles;
 
 public class IPCService : IDisposable
 {
+
     private Plugin plugin;
 
     private List<MyStatus> pendingStatusList = null;
@@ -92,39 +93,25 @@ public class IPCService : IDisposable
 
     public void UpdateMoodles()
     {
-        // ENTRY LOGGING
-        Plugin.Log.Verbose("[MoodlesSync] Function 'UpdateMoodles' called.");
-
         var playerAddress = Plugin.ObjectTable.LocalPlayer?.Address ?? nint.Zero;
-        if (playerAddress == nint.Zero)
-        {
-            Plugin.Log.Warning("[MoodlesSync] Update aborted: LocalPlayer address is null.");
-            return;
-        }
+        if (playerAddress == nint.Zero) return;
 
-        if (guidsInTransition.Count > 0)
-        {
-            Plugin.Log.Debug($"[MoodlesSync] Update throttled: {guidsInTransition.Count} GUIDs currently in transition.");
-            return;
-        }
+        // Check if we are already waiting for a wipe to finish
+        if (guidsInTransition.Count > 0) return;
 
         var raw = GetStatusManagerByPtrV2(playerAddress);
-        if (string.IsNullOrEmpty(raw))
-        {
-            Plugin.Log.Debug("[MoodlesSync] Update skipped: Status Manager is currently empty (Base64 null).");
-            return;
-        }
+        if (string.IsNullOrEmpty(raw)) return;
 
         var currentStatuses = Unpack(raw);
-        Plugin.Log.Verbose($"[MoodlesSync] Processing {currentStatuses.Count} active moodles.");
-
         bool needsSync = false;
-        var nextList = new List<MyStatus>();
-        var wipeList = new List<MyStatus>();
+
+        // FIX: Define the HashSet here so it exists in the whole function context
         var guidsToWipe = new HashSet<Guid>();
+        var nextList = new List<MyStatus>();
 
         foreach (var status in currentStatuses)
         {
+            // Only look for Moodles that belong to PatMe
             var config = plugin.Configuration.counterMoodles.FirstOrDefault(x => x.Id == status.GUID.ToString());
 
             if (config != null)
@@ -134,39 +121,27 @@ public class IPCService : IDisposable
 
                 if (status.Title != pTitle || status.Description != pDesc)
                 {
-                    Plugin.Log.Info($"[MoodlesSync] SYNC REQUIRED: GUID {status.GUID} text changed.");
                     needsSync = true;
                     status.Title = pTitle;
                     status.Description = pDesc;
                     guidsToWipe.Add(status.GUID);
                 }
-                nextList.Add(status);
             }
-            else
-            {
-                nextList.Add(status);
-            }
+
+            // Always add the status to our 'next' list (preserves Gamba/Unmanaged moodles)
+            nextList.Add(status);
         }
 
         if (needsSync)
         {
-            Plugin.Log.Info($"[MoodlesSync] WIPE PHASE: Removing {guidsToWipe.Count} statuses to force network refresh.");
             pendingStatusList = nextList;
             guidsInTransition = guidsToWipe;
 
-            // CLEARING LOGIC: Build list excluding the ones being wiped
-            foreach (var s in nextList)
-            {
-                if (!guidsToWipe.Contains(s.GUID)) wipeList.Add(s);
-            }
+            // Build a list that keeps Gamba moodles but removes the PatMe ones we want to refresh
+            var wipeList = nextList.Where(s => !guidsToWipe.Contains(s.GUID)).ToList();
 
-            Plugin.Log.Debug($"[MoodlesSync] Sending wipe-list with {wipeList.Count} statuses remaining.");
+            Plugin.Log.Info($"[PatMe] Syncing {guidsToWipe.Count} moodles. Preserving others.");
             SetStatusManagerByPtrV2(playerAddress, Pack(wipeList));
-        }
-        else
-        {
-            lastKnownGoodPack = raw;
-            Plugin.Log.Verbose("[MoodlesSync] Update finished: No text changes detected.");
         }
     }
 
