@@ -1,0 +1,87 @@
+using ECommons.DalamudServices;
+using ECommons.EzIpcManager;
+using ECommons.GameHelpers;
+using FFXIVClientStructs;
+using MemoryPack;
+using Moodles.Data;
+using System;
+using System.Collections.Generic;
+using System.Text;
+using System.Text.RegularExpressions;
+
+namespace PatMeMoodles;
+
+public class MoodlesBridge
+{
+
+    [EzIPC] private readonly Func<nint, string> GetStatusManagerByPtrV2;
+    [EzIPC] private readonly Action<nint, string> SetStatusManagerByPtrV2;
+
+    [EzIPCEvent]
+    private void StatusManagerModified(nint characterPointer)
+    {
+        if (characterPointer != Player.Object.Address)
+            return;
+
+        Set();
+    }
+
+    private Configuration config { get; init; }
+
+    public MoodlesBridge(Configuration config)
+    {
+        this.config = config;
+        EzIPC.Init(this, "Moodles");
+    }
+
+    private (List<MyStatus>, string) Get()
+    {
+        var base64 = GetStatusManagerByPtrV2(Player.Object.Address);
+        return (MemoryPackSerializer.Deserialize<List<MyStatus>>(Convert.FromBase64String(base64)), base64);
+    }
+
+    private string Parse(string input)
+    {
+        return Regex.Replace(input, @"\$(\d+)", match =>
+        {
+            if (ushort.TryParse(match.Groups[1].Value, out var id))
+            {
+                return config.emotes.TryGetValue(id, out var val) ? val.ToString() : "0";
+            }
+            return match.Value;
+        });
+    }
+
+    private bool waiting = false;
+    public void Set()
+    {
+        if (waiting)
+            return;
+
+        waiting = true;
+
+        Svc.Framework.RunOnFrameworkThread(() =>
+        {
+            var (statuses, base64Old) = Get();
+
+            for (var i = 0; i < statuses.Count; i++)
+            {
+                if (!config.moodles.TryGetValue(statuses[i].GUID, out var moodle))
+                    continue;
+
+                statuses[i].Title = Parse(moodle.Item1);
+                statuses[i].Description = Parse(moodle.Item2);
+            }
+
+            var base64New = Convert.ToBase64String(MemoryPackSerializer.Serialize(statuses));
+
+            if (base64New == base64Old)
+                return;
+
+            SetStatusManagerByPtrV2(Player.Object.Address, base64New);
+
+            waiting = false;
+        }).ConfigureAwait(false);
+    }
+
+}
