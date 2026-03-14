@@ -1,6 +1,7 @@
 using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Hooking;
 using Dalamud.Plugin.Services;
+using ECommons.DalamudServices;
 using ECommons.Logging;
 using System;
 using System.Collections.Generic;
@@ -44,7 +45,7 @@ public class Hook : IDisposable
             }
             plugin.Configuration.emoteCounter[emoteId] = newVal;
             plugin.Configuration.Save();
-            plugin.IPCService.UpdateMoodles();
+            Svc.Framework.RunOnFrameworkThread(() => plugin.IPCService.UpdateMoodles()).ConfigureAwait(false);
         }
         catch (Exception e)
         {

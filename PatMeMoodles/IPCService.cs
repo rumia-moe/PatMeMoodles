@@ -54,7 +54,7 @@ public class IPCService : IDisposable
     private void Ready()
     {
         Plugin.Log.Info("[MoodlesSync] IPC Ready Event received from Moodles.");
-        UpdateMoodles();
+        Svc.Framework.RunOnFrameworkThread(() => UpdateMoodles()).ConfigureAwait(false);
     }
 
     [EzIPCEvent]
@@ -88,7 +88,7 @@ public class IPCService : IDisposable
             return;
         }
 
-        UpdateMoodles();
+        Svc.Framework.RunOnFrameworkThread(() => UpdateMoodles()).ConfigureAwait(false);
     }
 
     public void UpdateMoodles()
