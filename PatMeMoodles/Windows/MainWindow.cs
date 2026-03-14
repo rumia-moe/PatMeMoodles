@@ -1,5 +1,6 @@
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
+using ECommons.DalamudServices;
 using Lumina.Excel.Sheets;
 using System.Numerics;
 
@@ -28,7 +29,7 @@ public class MainWindow(Plugin plugin) : Window("PatMeMoodles")
     {
         if (ImGui.Button("Force Update"))
         {
-            plugin.IPCService.UpdateMoodles();
+            Svc.Framework.RunOnFrameworkThread(() => plugin.IPCService.UpdateMoodles()).ConfigureAwait(false);
         }
         ImGui.SameLine();
         if (ImGui.Button("New"))
@@ -125,7 +126,7 @@ public class MainWindow(Plugin plugin) : Window("PatMeMoodles")
                     configuration.emoteCounter[id] = editBuffer[id];
                     lastSeenValues[id] = editBuffer[id]; // Update lastSeen so we don't trigger an overwrite
                     configuration.Save();
-                    plugin.IPCService.UpdateMoodles();
+                    Svc.Framework.RunOnFrameworkThread(() => plugin.IPCService.UpdateMoodles()).ConfigureAwait(false);
                 }
 
                 // Column 4: Delete
@@ -136,7 +137,7 @@ public class MainWindow(Plugin plugin) : Window("PatMeMoodles")
                     editBuffer.Remove(id);
                     lastSeenValues.Remove(id);
                     configuration.Save();
-                    plugin.IPCService.UpdateMoodles();
+                    Svc.Framework.RunOnFrameworkThread(() => plugin.IPCService.UpdateMoodles()).ConfigureAwait(false);
                 }
             }
             ImGui.EndTable();
@@ -150,7 +151,7 @@ public class MainWindow(Plugin plugin) : Window("PatMeMoodles")
                 editBuffer.Clear();
                 lastSeenValues.Clear();
                 configuration.Save();
-                plugin.IPCService.UpdateMoodles();
+                Svc.Framework.RunOnFrameworkThread(() => plugin.IPCService.UpdateMoodles()).ConfigureAwait(false);
             }
         }
     }
