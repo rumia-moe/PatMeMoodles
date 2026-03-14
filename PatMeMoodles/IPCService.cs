@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Dalamud.Game.ClientState.Conditions;
+using ECommons.DalamudServices;
 
 namespace PatMeMoodles;
 
@@ -42,7 +43,7 @@ public class IPCService : IDisposable
             var playerAddress = Plugin.ObjectTable.LocalPlayer?.Address ?? nint.Zero;
             if (playerAddress != nint.Zero && !string.IsNullOrEmpty(lastKnownGoodPack))
             {
-                SetStatusManagerByPtrV2(playerAddress, lastKnownGoodPack);
+                Svc.Framework.RunOnFrameworkThread(() => SetStatusManagerByPtrV2(playerAddress, lastKnownGoodPack)).ConfigureAwait(false);
                 guidsInTransition.Clear();
                 pendingStatusList = null;
             }
@@ -78,7 +79,7 @@ public class IPCService : IDisposable
                 guidsInTransition.Clear();
                 pendingStatusList = null;
 
-                SetStatusManagerByPtrV2(charaPtr, dataToSend);
+                Svc.Framework.RunOnFrameworkThread(() => SetStatusManagerByPtrV2(charaPtr, dataToSend)).ConfigureAwait(false);
             }
             else
             {
@@ -161,7 +162,7 @@ public class IPCService : IDisposable
             }
 
             Plugin.Log.Debug($"[MoodlesSync] Sending wipe-list with {wipeList.Count} statuses remaining.");
-            SetStatusManagerByPtrV2(playerAddress, Pack(wipeList));
+            Svc.Framework.RunOnFrameworkThread(() => SetStatusManagerByPtrV2(playerAddress, Pack(wipeList))).ConfigureAwait(false);
         }
         else
         {
