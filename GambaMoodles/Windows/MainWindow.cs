@@ -1,5 +1,6 @@
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
+using ECommons.DalamudServices;
 using System.Numerics;
 
 namespace GambaMoodles.Windows;
@@ -35,7 +36,7 @@ public class MainWindow(Plugin plugin) : Window("GambaMoodles")
     {
         if (ImGui.Button("Force Update"))
         {
-            plugin.IPCService.UpdateMoodles();
+            Svc.Framework.RunOnFrameworkThread(() => plugin.IPCService.UpdateMoodles()).ConfigureAwait(false);
         }
 
         ImGui.SameLine();
@@ -60,7 +61,7 @@ public class MainWindow(Plugin plugin) : Window("GambaMoodles")
             if (ImGui.Selectable("None", plugin.Bank.dealer == null))
             {
                 plugin.Bank.dealer = null;
-                plugin.IPCService.UpdateMoodles();
+                Svc.Framework.RunOnFrameworkThread(() => plugin.IPCService.UpdateMoodles()).ConfigureAwait(false);
             }
 
             foreach (var playerName in plugin.Bank.sources.Keys)
@@ -69,7 +70,7 @@ public class MainWindow(Plugin plugin) : Window("GambaMoodles")
                 if (ImGui.Selectable($"{playerName}##{playerName}", isSelected))
                 {
                     plugin.Bank.dealer = playerName;
-                    plugin.IPCService.UpdateMoodles();
+                    Svc.Framework.RunOnFrameworkThread(() => plugin.IPCService.UpdateMoodles()).ConfigureAwait(false);
                 }
             }
             ImGui.EndCombo();
@@ -198,7 +199,7 @@ public class MainWindow(Plugin plugin) : Window("GambaMoodles")
                     lastSeenBalances[name] = editBuffer[name];
 
                     plugin.Configuration.Save();
-                    plugin.IPCService.UpdateMoodles();
+                    Svc.Framework.RunOnFrameworkThread(() => plugin.IPCService.UpdateMoodles()).ConfigureAwait(false);
                 }
 
                 ImGui.SameLine();
@@ -210,7 +211,7 @@ public class MainWindow(Plugin plugin) : Window("GambaMoodles")
                     lastSeenBalances.Remove(name);
                     if (plugin.Bank.dealer == name) plugin.Bank.dealer = null;
                     plugin.Configuration.Save();
-                    plugin.IPCService.UpdateMoodles();
+                    Svc.Framework.RunOnFrameworkThread(() => plugin.IPCService.UpdateMoodles()).ConfigureAwait(false);
                 }
             }
             ImGui.EndTable();
@@ -225,7 +226,7 @@ public class MainWindow(Plugin plugin) : Window("GambaMoodles")
                 lastSeenBalances.Clear();
                 plugin.Bank.dealer = null;
                 plugin.Configuration.Save();
-                plugin.IPCService.UpdateMoodles();
+                Svc.Framework.RunOnFrameworkThread(() => plugin.IPCService.UpdateMoodles()).ConfigureAwait(false);
             }
         }
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Hold SHIFT to clear everything.");

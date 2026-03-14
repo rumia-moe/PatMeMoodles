@@ -4,6 +4,7 @@ using Dalamud.IoC;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using ECommons;
+using ECommons.DalamudServices;
 using ECommons.EzEventManager;
 using ECommons.Logging;
 using GambaMoodles.Windows;
@@ -86,7 +87,7 @@ public sealed class Plugin : IDalamudPlugin
             {
                 // Now safely on the main thread, trigger the initial sync
                 Log.Debug("Login/Load settled on main thread. Triggering initial Moodles sync.");
-                this.IPCService.UpdateMoodles();
+                Svc.Framework.RunOnFrameworkThread(() => this.IPCService.UpdateMoodles()).ConfigureAwait(false);
             }
         }
     }

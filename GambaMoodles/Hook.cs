@@ -4,6 +4,7 @@ using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Game.Text;
 using Dalamud.Game.Text.SeStringHandling;
 using ECommons;
+using ECommons.DalamudServices;
 using ECommons.GameHelpers;
 using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Client.UI.Arrays;
@@ -45,7 +46,7 @@ public unsafe class Hook : IDisposable
 
         plugin.Configuration.Save();
         Plugin.Log.Info($"[SUCCESS] {partner.Name.TextValue} balance: {bank[partner.Name.TextValue]}");
-        plugin.IPCService?.UpdateMoodles();
+        Svc.Framework.RunOnFrameworkThread(() => plugin.IPCService?.UpdateMoodles()).ConfigureAwait(false);
 
 
     }
