@@ -1,12 +1,10 @@
 using ECommons.DalamudServices;
 using ECommons.EzIpcManager;
 using ECommons.GameHelpers;
-using FFXIVClientStructs;
 using MemoryPack;
 using Moodles.Data;
 using System;
 using System.Collections.Generic;
-using System.Text;
 using System.Text.RegularExpressions;
 
 namespace PatMeMoodles;
@@ -14,12 +12,20 @@ namespace PatMeMoodles;
 public class MoodlesBridge
 {
 
+    private static readonly MemoryPackSerializerOptions SerializerOptions = new()
+    {
+        StringEncoding = StringEncoding.Utf16,
+    };
+
     [EzIPC] private readonly Func<nint, string> GetStatusManagerByPtrV2;
+    [EzIPC] private readonly Action<nint> ClearStatusManagerByPtrV2;
     [EzIPC] private readonly Action<nint, string> SetStatusManagerByPtrV2;
 
     [EzIPCEvent]
     private void StatusManagerModified(nint characterPointer)
     {
+        if (Player.Object == null)
+            return;
         if (characterPointer != Player.Object.Address)
             return;
 
@@ -36,8 +42,12 @@ public class MoodlesBridge
 
     private (List<MyStatus>, string) Get()
     {
+        if (Player.Object == null)
+            return ([], "");
+
         var base64 = GetStatusManagerByPtrV2(Player.Object.Address);
-        return (MemoryPackSerializer.Deserialize<List<MyStatus>>(Convert.FromBase64String(base64)), base64);
+
+        return (MemoryPackSerializer.Deserialize<List<MyStatus>>(Convert.FromBase64String(base64), SerializerOptions) ?? [], base64);
     }
 
     private string Parse(string input)
@@ -55,31 +65,38 @@ public class MoodlesBridge
     private bool waiting = false;
     public void Set()
     {
+        if (Player.Object == null)
+            return;
+
         if (waiting)
             return;
 
         waiting = true;
 
+        var (statuses, base64Old) = Get();
+
+        for (var i = 0; i < statuses.Count; i++)
+        {
+            if (!config.moodles.TryGetValue(statuses[i].GUID, out var moodle))
+                continue;
+
+            statuses[i].Title = Parse(moodle.Item1);
+            statuses[i].Description = Parse(moodle.Item2);
+        }
+
+        var base64New = Convert.ToBase64String(MemoryPackSerializer.Serialize(statuses, SerializerOptions));
+
+        if (base64New == base64Old)
+        {
+            waiting = false;
+            return;
+        }
+
+        ClearStatusManagerByPtrV2(Player.Object.Address);
+
         Svc.Framework.RunOnFrameworkThread(() =>
         {
-            var (statuses, base64Old) = Get();
-
-            for (var i = 0; i < statuses.Count; i++)
-            {
-                if (!config.moodles.TryGetValue(statuses[i].GUID, out var moodle))
-                    continue;
-
-                statuses[i].Title = Parse(moodle.Item1);
-                statuses[i].Description = Parse(moodle.Item2);
-            }
-
-            var base64New = Convert.ToBase64String(MemoryPackSerializer.Serialize(statuses));
-
-            if (base64New == base64Old)
-                return;
-
             SetStatusManagerByPtrV2(Player.Object.Address, base64New);
-
             waiting = false;
         }).ConfigureAwait(false);
     }

@@ -1,7 +1,7 @@
+using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
 using ECommons.DalamudServices;
 using Lumina.Excel.Sheets;
-using Dalamud.Bindings.ImGui;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -13,10 +13,11 @@ public class ConfigWindow(Plugin plugin) : Window("PatMeMoodles")
 {
     private readonly Configuration configuration = plugin.Configuration;
 
-    // Buffer for what the user is currently typing
-    private readonly Dictionary<ushort, int> editBuffer = new();
+    // Buffers for Moodle creation
+    private string newIdBuffer = string.Empty;
 
-    // Tracks the value the UI "knows" about to detect background changes
+    // Buffers for Counter editing
+    private readonly Dictionary<ushort, int> editBuffer = new();
     private readonly Dictionary<ushort, int> lastSeenValues = new();
 
     public override void Draw()
@@ -30,16 +31,9 @@ public class ConfigWindow(Plugin plugin) : Window("PatMeMoodles")
 
     private void DrawGlobalControls()
     {
-        if (ImGui.Button("Force Update"))
+        if (ImGui.Button("Force Update Moodles"))
         {
             plugin.MoodlesBridge.Set();
-        }
-        ImGui.SameLine();
-        if (ImGui.Button("Add New Moodle"))
-        {
-            // Add a new entry with a fresh Guid and empty strings
-            configuration.moodles.Add(Guid.NewGuid(), (string.Empty, string.Empty));
-            configuration.Save();
         }
     }
 
@@ -47,7 +41,37 @@ public class ConfigWindow(Plugin plugin) : Window("PatMeMoodles")
     {
         ImGui.TextColored(new Vector4(0.5f, 0.5f, 1f, 1f), "Moodle Configurations");
 
-        // Use ToList() to avoid "Collection modified" errors if we delete during iteration
+        // --- Add New Moodle Section ---
+        ImGui.SetNextItemWidth(300);
+        ImGui.InputTextWithHint("##new_guid", "Enter GUID for new Moodle...", ref newIdBuffer, 128);
+        ImGui.SameLine();
+
+        bool isValidGuid = Guid.TryParse(newIdBuffer, out var newGuid);
+        if (!isValidGuid) ImGui.BeginDisabled();
+
+        if (ImGui.Button("Add New"))
+        {
+            if (!configuration.moodles.ContainsKey(newGuid))
+            {
+                configuration.moodles.Add(newGuid, ("New Moodle", "Description with $ID"));
+                configuration.Save();
+                newIdBuffer = string.Empty;
+            }
+        }
+
+        if (!isValidGuid)
+        {
+            ImGui.EndDisabled();
+            if (!string.IsNullOrWhiteSpace(newIdBuffer))
+            {
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(1, 0, 0, 1), "Invalid GUID");
+            }
+        }
+
+        ImGui.Spacing();
+
+        // --- Existing Moodles ---
         foreach (var kvp in configuration.moodles.ToList())
         {
             var guid = kvp.Key;
@@ -55,12 +79,12 @@ public class ConfigWindow(Plugin plugin) : Window("PatMeMoodles")
 
             ImGui.PushID(guid.ToString());
 
-            var headerLabel = string.IsNullOrWhiteSpace(title) ? $"Moodle (New/Empty)" : title;
+            var headerLabel = string.IsNullOrWhiteSpace(title) ? $"{guid}" : title;
             if (ImGui.CollapsingHeader($"{headerLabel}###header"))
             {
                 ImGui.Indent();
 
-                ImGui.TextDisabled($"ID: {guid}");
+                ImGui.TextDisabled($"GUID: {guid}");
 
                 ImGui.AlignTextToFramePadding();
                 ImGui.Text("Title:"); ImGui.SameLine();
@@ -78,7 +102,7 @@ public class ConfigWindow(Plugin plugin) : Window("PatMeMoodles")
                 }
 
                 ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.4f, 0.1f, 0.1f, 1f));
-                if (ImGui.Button("Delete This Moodle"))
+                if (ImGui.Button("Delete Moodle Entry"))
                 {
                     configuration.moodles.Remove(guid);
                     configuration.Save();
@@ -105,17 +129,18 @@ public class ConfigWindow(Plugin plugin) : Window("PatMeMoodles")
             ImGui.TableSetupColumn("Del", ImGuiTableColumnFlags.WidthFixed, 45);
             ImGui.TableHeadersRow();
 
-            // Iterate through the renamed 'emotes' dictionary
             foreach (var entry in configuration.emotes.ToList())
             {
                 ImGui.TableNextRow();
                 ushort id = entry.Key;
                 int actualValue = entry.Value;
 
+                // Column 1: Name
                 ImGui.TableNextColumn();
-                var emoteName = emoteSheet.GetRowOrDefault(id).Value.Name.ToString() ?? "Unknown";
+                var emoteName = emoteSheet.GetRowOrDefault(id)?.Name ?? "Unknown";
                 ImGui.Text($"{emoteName} (${id})");
 
+                // Column 2: Value Logic
                 ImGui.TableNextColumn();
 
                 if (!lastSeenValues.ContainsKey(id)) lastSeenValues[id] = actualValue;
@@ -134,6 +159,7 @@ public class ConfigWindow(Plugin plugin) : Window("PatMeMoodles")
                     editBuffer[id] = bufferVal;
                 }
 
+                // Column 3: Set
                 ImGui.TableNextColumn();
                 if (ImGui.Button($"Set##{id}"))
                 {
@@ -143,6 +169,7 @@ public class ConfigWindow(Plugin plugin) : Window("PatMeMoodles")
                     plugin.MoodlesBridge.Set();
                 }
 
+                // Column 4: Delete
                 ImGui.TableNextColumn();
                 if (ImGui.Button($"X##{id}"))
                 {
@@ -166,10 +193,10 @@ public class ConfigWindow(Plugin plugin) : Window("PatMeMoodles")
                 configuration.Save();
                 plugin.MoodlesBridge.Set();
             }
-            else
-            {
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Hold SHIFT to reset all");
-            }
+        }
+        if (ImGui.IsItemHovered() && !ImGui.GetIO().KeyShift)
+        {
+            ImGui.SetTooltip("Hold SHIFT to reset all");
         }
     }
 }
