@@ -1,3 +1,4 @@
+using ECommons;
 using ECommons.DalamudServices;
 using ECommons.EzIpcManager;
 using ECommons.GameHelpers;
@@ -5,9 +6,10 @@ using MemoryPack;
 using Moodles.Data;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.RegularExpressions;
 
-namespace PatMeMoodles;
+namespace GambaMoodles;
 
 public class MoodlesBridge
 {
@@ -36,10 +38,12 @@ public class MoodlesBridge
     }
 
     private Configuration config { get; init; }
+    private Bank bank{ get; init; }
 
-    public MoodlesBridge(Configuration config)
+    public MoodlesBridge(Configuration config, Bank bank)
     {
         this.config = config;
+        this.bank = bank;
         EzIPC.Init(this, "Moodles");
     }
 
@@ -52,16 +56,16 @@ public class MoodlesBridge
 
         return (MemoryPackSerializer.Deserialize<List<MyStatus>>(Convert.FromBase64String(base64), SerializerOptions) ?? [], base64);
     }
-
     private string Parse(string input)
     {
-        return Regex.Replace(input, @"\$(\d+)", match =>
+        if (string.IsNullOrEmpty(input)) return string.Empty;
+        return Regex.Replace(input, @"@gamba", match =>
         {
-            if (ushort.TryParse(match.Groups[1].Value, out var id))
-            {
-                return config.emotes.TryGetValue(id, out var val) ? val.ToString() : "0";
-            }
-            return match.Value;
+
+            if (bank.dealer == null) return "0.00";
+
+            return Plugin.FormatNumber(bank.sources.TryGetValue(bank.dealer, out var val) ? val : 0);
+
         });
     }
 
@@ -77,11 +81,11 @@ public class MoodlesBridge
 
             for (var i = 0; i < statuses.Count; i++)
             {
-                if (!config.moodles.TryGetValue(statuses[i].GUID, out var moodle))
+                if (!config.moodles.TryGetFirst(x => x.Id == statuses[i].GUID.ToString(), out var moodle))
                     continue;
 
-                statuses[i].Title = Parse(moodle.Item1);
-                statuses[i].Description = Parse(moodle.Item2);
+                statuses[i].Title = Parse(moodle.Title);
+                statuses[i].Description = Parse(moodle.Description);
             }
 
             var base64New = Convert.ToBase64String(MemoryPackSerializer.Serialize(statuses, SerializerOptions));

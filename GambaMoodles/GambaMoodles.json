@@ -1,0 +1,11 @@
+{
+  "Author": "rumia-moe",
+  "Name": "GambaMoodles",
+  "Punchline": "Track your losses!",
+  "Description": "Tracks winning using Moodles.",
+  "ApplicableVersion": "any",
+  "Tags": [
+    "plugin",
+    "moodles"
+  ]
+}
