@@ -1,6 +1,7 @@
 using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Hooking;
 using ECommons.DalamudServices;
+using ECommons.GameHelpers;
 using ECommons.Logging;
 using System;
 using System.Linq;
@@ -32,9 +33,9 @@ public class EmoteHook : IDisposable
         try
         {
             //OnEmote?.Invoke(instigatorAddr, emoteId, targetId);
-            if (Svc.Objects.LocalPlayer == null) return;
+            if (Player.Object == null) return;
             if (Svc.Objects.FirstOrDefault(x => (ulong)x.Address == instigatorAddr) is IPlayerCharacter instigator && instigator.GameObjectId == targetId) return;
-            if (targetId != Svc.Objects.LocalPlayer.GameObjectId) return;
+            if (targetId != Player.Object.GameObjectId) return;
             var newVal = 1;
             if (plugin.Configuration.emotes.TryGetValue(emoteId, out var oldVal))
             {

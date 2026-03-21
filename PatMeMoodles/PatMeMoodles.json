@@ -1,12 +1,12 @@
 {
-  "Author": "your name here",
-  "Name": "Sample Plugin",
-  "Punchline": "A short one-liner that shows up in /xlplugins.",
-  "Description": "A description that shows up in /xlplugins. List any major slash-command(s).",
+  "Author": "rumia-moe",
+  "Name": "PatMeMoodles",
+  "Punchline": "Emotes counters with icons!",
+  "Description": "Display emote counters with the Moodles plugin.",
   "ApplicableVersion": "any",
   "Tags": [
-    "sample",
+    "emote",
     "plugin",
-    "goats"
+    "moodles"
   ]
 }

@@ -21,6 +21,8 @@ public class MoodlesBridge
     [EzIPC] private readonly Action<nint> ClearStatusManagerByPtrV2;
     [EzIPC] private readonly Action<nint, string> SetStatusManagerByPtrV2;
 
+    private string base64;
+
     [EzIPCEvent]
     private void StatusManagerModified(nint characterPointer)
     {
@@ -30,6 +32,7 @@ public class MoodlesBridge
             return;
 
         Set();
+
     }
 
     private Configuration config { get; init; }
@@ -62,42 +65,37 @@ public class MoodlesBridge
         });
     }
 
-    private bool waiting = false;
     public void Set()
     {
-        if (Player.Object == null)
-            return;
-
-        if (waiting)
-            return;
-
-        waiting = true;
-
-        var (statuses, base64Old) = Get();
-
-        for (var i = 0; i < statuses.Count; i++)
-        {
-            if (!config.moodles.TryGetValue(statuses[i].GUID, out var moodle))
-                continue;
-
-            statuses[i].Title = Parse(moodle.Item1);
-            statuses[i].Description = Parse(moodle.Item2);
-        }
-
-        var base64New = Convert.ToBase64String(MemoryPackSerializer.Serialize(statuses, SerializerOptions));
-
-        if (base64New == base64Old)
-        {
-            waiting = false;
-            return;
-        }
-
-        ClearStatusManagerByPtrV2(Player.Object.Address);
 
         Svc.Framework.RunOnFrameworkThread(() =>
         {
-            SetStatusManagerByPtrV2(Player.Object.Address, base64New);
-            waiting = false;
+            if (Player.Object == null)
+            return;
+
+            var (statuses, _) = Get();
+
+            for (var i = 0; i < statuses.Count; i++)
+            {
+                if (!config.moodles.TryGetValue(statuses[i].GUID, out var moodle))
+                    continue;
+
+                statuses[i].Title = Parse(moodle.Item1);
+                statuses[i].Description = Parse(moodle.Item2);
+            }
+
+            var base64New = Convert.ToBase64String(MemoryPackSerializer.Serialize(statuses, SerializerOptions));
+
+            if (base64New == base64)
+            {
+                return;
+            }
+
+            base64 = base64New;
+
+            ClearStatusManagerByPtrV2(Player.Object.Address);
+            Svc.Framework.RunOnFrameworkThread(() => SetStatusManagerByPtrV2(Player.Object.Address, base64New));
+
         }).ConfigureAwait(false);
     }
 

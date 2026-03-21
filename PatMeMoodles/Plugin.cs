@@ -18,6 +18,7 @@ public sealed class Plugin : IDalamudPlugin
 
     public Configuration Configuration { get; init; }
     public MoodlesBridge MoodlesBridge { get; init; }
+    private EmoteHook EmoteHook { get; init; }
 
     public readonly WindowSystem WindowSystem = new("PatMeMoodles");
     private ConfigWindow ConfigWindow { get; init; }
@@ -29,6 +30,7 @@ public sealed class Plugin : IDalamudPlugin
         Configuration = Configuration.Load(Svc.PluginInterface);
 
         MoodlesBridge = new(Configuration);
+        EmoteHook = new(this);
 
         ConfigWindow = new ConfigWindow(this);
 
@@ -55,6 +57,8 @@ public sealed class Plugin : IDalamudPlugin
         WindowSystem.RemoveAllWindows();
 
         Svc.Commands.RemoveHandler(CommandName);
+
+        EmoteHook.Dispose();
 
         ECommonsMain.Dispose();
     }

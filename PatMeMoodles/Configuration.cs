@@ -1,7 +1,5 @@
 using Dalamud.Configuration;
 using Dalamud.Plugin;
-using ECommons;
-using ECommons.Configuration;
 using ECommons.DalamudServices;
 using System;
 using System.Collections.Generic;
