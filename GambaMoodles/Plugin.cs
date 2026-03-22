@@ -44,8 +44,6 @@ public sealed class Plugin : IDalamudPlugin
         Svc.PluginInterface.UiBuilder.Draw += WindowSystem.Draw;
         Svc.PluginInterface.UiBuilder.OpenConfigUi += ConfigWindow.Toggle;
         Svc.PluginInterface.UiBuilder.OpenMainUi += ConfigWindow.Toggle;
-
-        ProperOnLogin.RegisterAvailable(MoodlesBridge.Set, true);
     }
 
     public void Dispose()
@@ -59,6 +57,8 @@ public sealed class Plugin : IDalamudPlugin
         Svc.Commands.RemoveHandler(CommandName);
 
         TradeHook.Dispose();
+
+        MoodlesBridge.Dispose();
 
         ECommonsMain.Dispose();
     }
