@@ -1,3 +1,5 @@
+using Dalamud.Game.ClientState.Conditions;
+using Dalamud.Plugin.Services;
 using ECommons.DalamudServices;
 using ECommons.EzIpcManager;
 using ECommons.GameHelpers;
@@ -9,7 +11,7 @@ using System.Text.RegularExpressions;
 
 namespace PatMeMoodles;
 
-public class MoodlesBridge
+public class MoodlesBridge : IDisposable
 {
 
     private static readonly MemoryPackSerializerOptions SerializerOptions = new()
@@ -20,8 +22,6 @@ public class MoodlesBridge
     [EzIPC] private readonly Func<nint, string> GetStatusManagerByPtrV2;
     [EzIPC] private readonly Action<nint> ClearStatusManagerByPtrV2;
     [EzIPC] private readonly Action<nint, string> SetStatusManagerByPtrV2;
-
-    private string base64;
 
     [EzIPCEvent]
     private void StatusManagerModified(nint characterPointer)
@@ -36,11 +36,40 @@ public class MoodlesBridge
     }
 
     private Configuration config { get; init; }
+    private string base64 = "";
 
     public MoodlesBridge(Configuration config)
     {
         this.config = config;
         EzIPC.Init(this, "Moodles");
+
+        Svc.ClientState.TerritoryChanged += OnZoneChange;
+    }
+
+    public void Dispose()
+    {
+        Svc.Framework.Update -= WaitUntilReady;
+        Svc.ClientState.TerritoryChanged -= OnZoneChange;
+    }
+
+    private void OnZoneChange(ushort territoryId)
+    {
+        Svc.Framework.Update += WaitUntilReady;
+    }
+
+    private void WaitUntilReady(IFramework framework)
+    {
+        if (Player.Object == null) return;
+
+        if (Svc.Condition[ConditionFlag.BetweenAreas] ||
+            Svc.Condition[ConditionFlag.BetweenAreas51])
+        {
+            return;
+        }
+
+        Svc.Framework.Update -= WaitUntilReady;
+
+        Svc.Framework.RunOnFrameworkThread(() => SetStatusManagerByPtrV2(Player.Object.Address, base64)).ConfigureAwait(false);
     }
 
     private (List<MyStatus>, string) Get()
@@ -65,7 +94,7 @@ public class MoodlesBridge
         });
     }
 
-    public void Set()
+    public void Set(bool force = false)
     {
 
         Svc.Framework.RunOnFrameworkThread(() =>
@@ -73,7 +102,7 @@ public class MoodlesBridge
             if (Player.Object == null)
             return;
 
-            var (statuses, _) = Get();
+            var (statuses, base64Old) = Get();
 
             for (var i = 0; i < statuses.Count; i++)
             {
@@ -86,7 +115,7 @@ public class MoodlesBridge
 
             var base64New = Convert.ToBase64String(MemoryPackSerializer.Serialize(statuses, SerializerOptions));
 
-            if (base64New == base64)
+            if (base64New == base64Old && !force)
             {
                 return;
             }
@@ -94,7 +123,7 @@ public class MoodlesBridge
             base64 = base64New;
 
             ClearStatusManagerByPtrV2(Player.Object.Address);
-            Svc.Framework.RunOnFrameworkThread(() => SetStatusManagerByPtrV2(Player.Object.Address, base64New));
+            Svc.Framework.RunOnFrameworkThread(() => SetStatusManagerByPtrV2(Player.Object.Address, base64New)).ConfigureAwait(false);
 
         }).ConfigureAwait(false);
     }

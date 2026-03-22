@@ -33,7 +33,7 @@ public class ConfigWindow(Plugin plugin) : Window("PatMeMoodles")
     {
         if (ImGui.Button("Force Update Moodles"))
         {
-            plugin.MoodlesBridge.Set();
+            plugin.MoodlesBridge.Set(true);
         }
     }
 
