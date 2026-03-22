@@ -113,17 +113,15 @@ public class MoodlesBridge : IDisposable
                 statuses[i].Description = Parse(moodle.Item2);
             }
 
-            var base64New = Convert.ToBase64String(MemoryPackSerializer.Serialize(statuses, SerializerOptions));
+            base64 = Convert.ToBase64String(MemoryPackSerializer.Serialize(statuses, SerializerOptions));
 
-            if (base64New == base64Old && !force)
+            if (base64 == base64Old && !force)
             {
                 return;
             }
 
-            base64 = base64New;
-
             ClearStatusManagerByPtrV2(Player.Object.Address);
-            Svc.Framework.RunOnFrameworkThread(() => SetStatusManagerByPtrV2(Player.Object.Address, base64New)).ConfigureAwait(false);
+            Svc.Framework.RunOnFrameworkThread(() => SetStatusManagerByPtrV2(Player.Object.Address, base64)).ConfigureAwait(false);
 
         }).ConfigureAwait(false);
     }
