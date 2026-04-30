@@ -52,7 +52,7 @@ public class MoodlesBridge : IDisposable
         Svc.ClientState.TerritoryChanged -= OnZoneChange;
     }
 
-    private void OnZoneChange(ushort territoryId)
+    private void OnZoneChange(uint territoryId)
     {
         Svc.Framework.Update += WaitUntilReady;
     }
